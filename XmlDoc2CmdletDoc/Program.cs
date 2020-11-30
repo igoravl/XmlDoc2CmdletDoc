@@ -21,32 +21,54 @@ namespace XmlDoc2CmdletDoc
         {
             const string strictSwitch = "-strict";
             const string excludeParameterSetSwitch = "-excludeParameterSets";
+            const string rootUrlSwitch = "-rootUrl";
+            const string outputHelpFilePathSwitch = "-out";
 
             try
             {
                 var treatWarningsAsErrors = false;
                 var excludedParameterSets = new List<string>();
                 string assemblyPath = null;
+                string rootUrl = null;
+                string outputHelpFilePath = null;
 
                 for (var i = 0; i < args.Count; i++)
                 {
-                    if (args[i] == strictSwitch)
+                    switch (args[i])
                     {
-                        treatWarningsAsErrors = true;
-                    }
-                    else if (args[i] == excludeParameterSetSwitch)
-                    {
-                        i++;
-                        if (i >= args.Count) throw new ArgumentException();
-                        excludedParameterSets.AddRange(args[i].Split(new [] {','}, StringSplitOptions.RemoveEmptyEntries).Select(p => p.Trim()));
-                    }
-                    else if (assemblyPath == null)
-                    {
-                        assemblyPath = args[i];
-                    }
-                    else
-                    {
-                        throw new ArgumentException();
+                        case strictSwitch:
+                            treatWarningsAsErrors = true;
+                            break;
+                        case excludeParameterSetSwitch:
+                        {
+                            i++;
+                            if (i >= args.Count) throw new ArgumentException();
+                            excludedParameterSets.AddRange(args[i].Split(new [] {','}, StringSplitOptions.RemoveEmptyEntries).Select(p => p.Trim()));
+                            break;
+                        }
+                        case rootUrlSwitch:
+                        {
+                            rootUrl = args[++i];
+                            break;
+                        }
+                        case outputHelpFilePathSwitch:
+                        {
+                            outputHelpFilePath = args[++i];
+                            break;
+                        }
+                        default:
+                        {
+                            if (assemblyPath == null)
+                            {
+                                assemblyPath = args[i];
+                            }
+                            else
+                            {
+                                throw new ArgumentException();
+                            }
+
+                            break;
+                        }
                     }
                 }
 
@@ -55,7 +77,13 @@ namespace XmlDoc2CmdletDoc
                     throw new ArgumentException();
                 }
 
-                return new Options(treatWarningsAsErrors, assemblyPath, excludedParameterSets.Contains);
+                return new Options(
+                                   treatWarningsAsErrors,
+                                   assemblyPath,
+                                   excludedParameterSets.Contains,
+                                   outputHelpFilePath,
+                                   null,
+                                   rootUrl);
             }
             catch (ArgumentException)
             {

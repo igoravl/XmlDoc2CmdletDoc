@@ -19,6 +19,7 @@ namespace XmlDoc2CmdletDoc.Tests
         private static readonly XNamespace mamlNs = XNamespace.Get("http://schemas.microsoft.com/maml/2004/10");
         private static readonly XNamespace commandNs = XNamespace.Get("http://schemas.microsoft.com/maml/dev/command/2004/10");
         private static readonly XNamespace devNs = XNamespace.Get("http://schemas.microsoft.com/maml/dev/2004/10");
+        private static readonly XNamespace tfscmdletsNs = XNamespace.Get("https://igoravl.github.com/tfscmdlets/maml/");
 
         private static readonly IXmlNamespaceResolver resolver;
 
@@ -29,6 +30,7 @@ namespace XmlDoc2CmdletDoc.Tests
             manager.AddNamespace("maml", mamlNs.NamespaceName);
             manager.AddNamespace("command", commandNs.NamespaceName);
             manager.AddNamespace("dev", devNs.NamespaceName);
+            manager.AddNamespace("tfscmdlets", tfscmdletsNs.NamespaceName);
             resolver = manager;
         }
 

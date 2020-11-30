@@ -3,6 +3,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
+using System.Text;
 using System.Text.RegularExpressions;
 using System.Xml;
 using System.Xml.Linq;
@@ -17,10 +18,14 @@ namespace XmlDoc2CmdletDoc.Core.Extensions
     /// </summary>
     public static class CommentReaderExtensions
     {
+        private static readonly Regex REGEX_LINE_BREAK = new Regex(@"\r?\n", RegexOptions.Compiled);
+        private static readonly Regex REGEX_MULTI_WHITESPACE = new Regex(@"\s{2,}", RegexOptions.Compiled);
+
         private static readonly XNamespace MshNs = XNamespace.Get("http://msh");
         private static readonly XNamespace MamlNs = XNamespace.Get("http://schemas.microsoft.com/maml/2004/10");
         private static readonly XNamespace CommandNs = XNamespace.Get("http://schemas.microsoft.com/maml/dev/command/2004/10");
         private static readonly XNamespace DevNs = XNamespace.Get("http://schemas.microsoft.com/maml/dev/2004/10");
+        private static readonly XNamespace TfsCmdletsNs = XNamespace.Get("https://igoravl.github.com/tfscmdlets/maml/");
 
         private static readonly IXmlNamespaceResolver Resolver;
 
@@ -31,6 +36,7 @@ namespace XmlDoc2CmdletDoc.Core.Extensions
             manager.AddNamespace("maml", MamlNs.NamespaceName);
             manager.AddNamespace("command", CommandNs.NamespaceName);
             manager.AddNamespace("dev", DevNs.NamespaceName);
+            manager.AddNamespace("tfscmdlets", TfsCmdletsNs.NamespaceName);
             Resolver = manager;
         }
 
@@ -45,7 +51,7 @@ namespace XmlDoc2CmdletDoc.Core.Extensions
         {
             var cmdletType = command.CmdletType;
             var commentsElement = commentReader.GetComments(cmdletType);
-            return GetMamlDescriptionElementFromXmlDocComment(commentsElement, "synopsis", warningText => reportWarning(cmdletType, warningText));
+            return GetMamlDescriptionElementFromXmlDocComment(commentsElement, "synopsis", "summary", warningText => reportWarning(cmdletType, warningText));
         }
 
         /// <summary>
@@ -59,7 +65,7 @@ namespace XmlDoc2CmdletDoc.Core.Extensions
         {
             var cmdletType = command.CmdletType;
             var commentsElement = commentReader.GetComments(cmdletType);
-            return GetMamlDescriptionElementFromXmlDocComment(commentsElement, "description", warningText => reportWarning(cmdletType, warningText));
+            return GetMamlDescriptionElementFromXmlDocComment(commentsElement, "description", "remarks", warningText => reportWarning(cmdletType, warningText));
         }
 
         /// <summary>
@@ -113,6 +119,7 @@ namespace XmlDoc2CmdletDoc.Core.Extensions
             var intros = items.TakeWhile(x => x.Name == "para").ToList();
             var code = items.SkipWhile(x => x.Name == "para").TakeWhile(x => x.Name == "code").FirstOrDefault();
             var paras = items.SkipWhile(x => x.Name == "para").SkipWhile(x => x.Name == "code").ToList();
+            paras.Add(new XElement("para"));
 
             var example = new XElement(CommandNs + "example",
                            new XElement(MamlNs + "title", $"----------  EXAMPLE {exampleNumber}  ----------"));
@@ -127,7 +134,9 @@ namespace XmlDoc2CmdletDoc.Core.Extensions
             }
             if (code != null)
             {
-                example.Add(new XElement(DevNs + "code", TidyCode(code.Value)));
+                var codeValue = code.Value;
+                if (!codeValue.StartsWith("PS>")) codeValue = $"PS> {codeValue}";
+                example.Add(new XElement(DevNs + "code", TidyCode(codeValue)));
                 isEmpty = false;
             }
             if (paras.Any())
@@ -153,17 +162,19 @@ namespace XmlDoc2CmdletDoc.Core.Extensions
         /// <param name="command">The command.</param>
         /// <param name="reportWarning">Used to log any warnings.</param>
         /// <returns>An relatedLinks element for the cmdlet.</returns>
-        public static XElement GetCommandRelatedLinksElement(this ICommentReader commentReader, Command command, ReportWarning reportWarning)
+        public static XElement GetCommandRelatedLinksElement(this ICommentReader commentReader, Command command, ReportWarning reportWarning, string rootUrl)
         {
             var cmdletType = command.CmdletType;
             var comments = commentReader.GetComments(cmdletType);
-            if (comments == null)
-            {
-                return null;
-            }
 
-            var paras = comments.XPathSelectElements("//para[@type='link']").ToList();
-            if (!paras.Any()) return null;
+            if (comments == null) { return null; }
+
+            var t = command.CmdletType;
+            var urlPath = t.FullName.Substring(19, t.FullName.Length - t.Name.Length - 20).Replace('.', '/');
+            var url = $"{rootUrl.TrimEnd('/')}/{urlPath}/{command.Name}";
+
+            var paras = comments.XPathSelectElements("//related").ToList();
+            paras.Insert(0, new XElement("related", new XAttribute("uri", $"{url}"), "Online Version:"));
 
             var relatedLinks = new XElement(MamlNs + "relatedLinks");
             foreach (var para in paras)
@@ -204,34 +215,16 @@ namespace XmlDoc2CmdletDoc.Core.Extensions
             }
 
             // Next, search for a list element of type <em>alertSet</em>.
-            var list = comments.XPathSelectElement("//list[@type='alertSet']");
-            if (list == null)
+            var notes = comments.XPathSelectElement("//notes");
+            if (notes == null)
             {
                 return null;
             }
-            alertSet = new XElement(MamlNs + "alertSet");
-            foreach (var item in list.XPathSelectElements("item"))
-            {
-                var term = item.XPathSelectElement("term");
-                var description = item.XPathSelectElement("description");
-                if (term != null && description != null)
-                {
-                    var alertTitle = new XElement(MamlNs + "title", Tidy(term.Value));
 
-                    var alert = new XElement(MamlNs + "alert");
-                    var paras = description.XPathSelectElements("para").ToList();
-                    if (paras.Any())
-                    {
-                        paras.ForEach(para => alert.Add(new XElement(MamlNs + "para", Tidy(para.Value))));
-                    }
-                    else
-                    {
-                        alert.Add(new XElement(MamlNs + "para", Tidy(description.Value)));
-                    }
+            alertSet = new XElement(MamlNs + "alertSet", 
+                TextToParagraph(notes.Value)
+            );
 
-                    alertSet.Add(alertTitle, alert);
-                }
-            }
             return alertSet;
         }
 
@@ -246,7 +239,7 @@ namespace XmlDoc2CmdletDoc.Core.Extensions
         {
             var memberInfo = parameter.MemberInfo;
             var commentsElement = commentReader.GetComments(memberInfo);
-            return GetMamlDescriptionElementFromXmlDocComment(commentsElement, "description", warningText => reportWarning(memberInfo, warningText));
+            return GetMamlDescriptionElementFromXmlDocComment(commentsElement, "description", "summary", warningText => reportWarning(memberInfo, warningText));
         }
 
         /// <summary>
@@ -305,7 +298,7 @@ namespace XmlDoc2CmdletDoc.Core.Extensions
             var commentsElement = commentReader.GetComments(parameterMemberInfo);
 
             // First try to read the explicit inputType description.
-            var inputTypeDescription = GetMamlDescriptionElementFromXmlDocComment(commentsElement, "inputType", _ => { });
+            var inputTypeDescription = GetMamlDescriptionElementFromXmlDocComment(commentsElement, "inputType", "para[@type = 'inputType']", _ => { });
             if (inputTypeDescription != null)
             {
                 return inputTypeDescription;
@@ -348,7 +341,7 @@ namespace XmlDoc2CmdletDoc.Core.Extensions
         public static XElement GetTypeDescriptionElement(this ICommentReader commentReader, Type type, ReportWarning reportWarning)
         {
             var commentsElement = commentReader.GetComments(type);
-            return GetMamlDescriptionElementFromXmlDocComment(commentsElement, "description", warningText => reportWarning(type, warningText));
+            return GetMamlDescriptionElementFromXmlDocComment(commentsElement, "description", "para[@type = 'description']", warningText => reportWarning(type, warningText));
         }
 
         /// <summary>
@@ -386,7 +379,7 @@ namespace XmlDoc2CmdletDoc.Core.Extensions
         /// </param>
         /// <param name="reportWarning">Used to log any warnings.</param>
         /// <returns>A description element derived from the XML doc comment, or null if a description could not be obtained.</returns>
-        private static XElement GetMamlDescriptionElementFromXmlDocComment(XElement commentsElement, string typeAttribute, Action<string> reportWarning)
+        private static XElement GetMamlDescriptionElementFromXmlDocComment(XElement commentsElement, string typeAttribute, string sourceXPath, Action<string> reportWarning)
         {
             if (commentsElement != null)
             {
@@ -399,13 +392,12 @@ namespace XmlDoc2CmdletDoc.Core.Extensions
                     return mamlDescriptionElement;
                 }
 
-                // Next try <para type="typeAttribute"> elements.
-                var paraElements = commentsElement.XPathSelectElements($".//para[@type='{typeAttribute}']").ToList();
+                // Next try other elements.
+                var paraElements = commentsElement.XPathSelectElements($".//{sourceXPath}").ToList();
+
                 if (paraElements.Any())
                 {
-                    var descriptionElement = new XElement(MamlNs + "description");
-                    paraElements.ForEach(para => descriptionElement.Add(new XElement(MamlNs + "para", Tidy(para.Value))));
-                    return descriptionElement;
+                    return new XElement(MamlNs + "description", paraElements.SelectMany(e => TextToParagraph(e.Value)));
                 }
             }
 
@@ -422,7 +414,39 @@ namespace XmlDoc2CmdletDoc.Core.Extensions
         /// <returns>The tidied string.</returns>
         private static string Tidy(string value)
         {
-            return new Regex(@"\s{2,}").Replace(value, " ").Trim();
+            return REGEX_MULTI_WHITESPACE.Replace(value, " ").Trim();
+        }
+
+        /// <summary>
+        /// Converts text retrieved from an XML doc comment to [maml:para] elements. 
+        /// Blank lines are used as paragraph separators. Multiple whitespace characters 
+        /// are replaced with a single space, and leading and trailing whitespace is removed.
+        /// </summary>
+        /// <param name="value">The string to tidy.</param>
+        /// <returns>The tidied string.</returns>
+        private static ICollection<XElement> TextToParagraph(string value)
+        {
+            var rows = REGEX_LINE_BREAK.Split(value).Select(r => r.Trim());
+            var paras = new List<XElement>();
+            var para = new XElement(MamlNs + "para");
+
+            foreach (var row in rows)
+            {
+                if(string.IsNullOrEmpty(row))
+                {
+                    if(para != null && (!string.IsNullOrEmpty(para.Value)))
+                    {
+                        paras.Add(para);
+                        para = new XElement(MamlNs + "para");
+                    }
+
+                    continue;
+                }
+
+                para.Value += row + " ";
+            }
+
+            return paras;
         }
 
         private static string TidyCode(string value)

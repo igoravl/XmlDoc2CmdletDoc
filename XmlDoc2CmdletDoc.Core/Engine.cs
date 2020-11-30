@@ -35,6 +35,8 @@ namespace XmlDoc2CmdletDoc.Core
         private static readonly XNamespace MamlNs = XNamespace.Get("http://schemas.microsoft.com/maml/2004/10");
         private static readonly XNamespace CommandNs = XNamespace.Get("http://schemas.microsoft.com/maml/dev/command/2004/10");
         private static readonly XNamespace DevNs = XNamespace.Get("http://schemas.microsoft.com/maml/dev/2004/10");
+        private static readonly XNamespace TfsCmdletsNs = XNamespace.Get("https://igoravl.github.com/tfscmdlets/maml/");
+        private Options Options { get; set; }
 
         /// <summary>
         /// Public entry point that triggers the creation of the cmdlet XML help file for a single assembly.
@@ -52,6 +54,7 @@ namespace XmlDoc2CmdletDoc.Core
                 var assembly = LoadAssembly(options);
                 var commentReader = LoadComments(options, reportWarning);
                 var cmdletTypes = GetCommands(assembly);
+                Options = options;
 
 
                 var document = new XDocument(new XDeclaration("1.0", "utf-8", null),
@@ -251,6 +254,8 @@ namespace XmlDoc2CmdletDoc.Core
                                 new XAttribute(XNamespace.Xmlns + "maml", MamlNs),
                                 new XAttribute(XNamespace.Xmlns + "command", CommandNs),
                                 new XAttribute(XNamespace.Xmlns + "dev", DevNs),
+                                new XAttribute(XNamespace.Xmlns + "tfscmdlets", TfsCmdletsNs),
+                                new XAttribute(TfsCmdletsNs + "module", GetModule(command)),
                                 GenerateDetailsElement(commentReader, command, reportWarning),
                                 GenerateDescriptionElement(commentReader, command, reportWarning),
                                 GenerateSyntaxElement(commentReader, command, reportWarning, options.IsExcludedParameterSetName),
@@ -260,6 +265,11 @@ namespace XmlDoc2CmdletDoc.Core
                                 GenerateAlertSetElement(commentReader, command, reportWarning),
                                 GenerateExamplesElement(commentReader, command, reportWarning),
                                 GenerateRelatedLinksElement(commentReader, command, reportWarning));
+        }
+
+        private string GetModule(Command command)
+        {
+            return command.CmdletType.FullName.Substring(19, command.CmdletType.FullName.Length - command.CmdletType.Name.Length - 20);
         }
 
         /// <summary>
@@ -301,6 +311,8 @@ namespace XmlDoc2CmdletDoc.Core
         private XElement GenerateSyntaxElement(ICommentReader commentReader, Command command, ReportWarning reportWarning, Predicate<string> isExcludedParameterSetName)
         {
             var syntaxElement = new XElement(CommandNs + "syntax");
+
+
             IEnumerable<string> parameterSetNames = command.ParameterSetNames.ToList();
             if (parameterSetNames.Count() > 1)
             {
@@ -308,7 +320,7 @@ namespace XmlDoc2CmdletDoc.Core
             }
             foreach (var parameterSetName in parameterSetNames.Where(name => !isExcludedParameterSetName(name)))
             {
-                syntaxElement.Add(GenerateComment("Parameter set: " + parameterSetName));
+                syntaxElement.Add(GenerateComment("Parameter Set: " + parameterSetName));
                 syntaxElement.Add(GenerateSyntaxItemElement(commentReader, command, parameterSetName, reportWarning));
             }
             return syntaxElement;
@@ -326,6 +338,8 @@ namespace XmlDoc2CmdletDoc.Core
         {
             var syntaxItemElement = new XElement(CommandNs + "syntaxItem",
                                                  new XElement(MamlNs + "name", command.Name));
+            syntaxItemElement.Add(new XAttribute(TfsCmdletsNs + "parameterSet", parameterSetName));
+
             foreach (var parameter in command.GetParameters(parameterSetName).Where(p => !p.MemberInfo.CustomAttributes.Any(x => x.AttributeType == typeof(ObsoleteAttribute)))
                                                                              .OrderBy(p => p.GetPosition(parameterSetName))
                                                                              .ThenBy(p => p.IsRequired(parameterSetName) ? "0" : "1")
@@ -545,7 +559,7 @@ namespace XmlDoc2CmdletDoc.Core
         /// <returns>A <em>&lt;maml:relatedLinks&gt;</em> element for the <paramref name="command"/>.</returns>
         private XElement GenerateRelatedLinksElement(ICommentReader commentReader, Command command, ReportWarning reportWarning)
         {
-            return commentReader.GetCommandRelatedLinksElement(command, reportWarning);
+            return commentReader.GetCommandRelatedLinksElement(command, reportWarning, Options.RootUrl);
         }
 
         /// <summary>
